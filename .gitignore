@@ -223,3 +223,11 @@ video/demos/*
 datasets/*
 checkpoints/*
 demos/*
+
+video*/
+video*.zip
+wandb/
+
+.venv/
+
+data/
