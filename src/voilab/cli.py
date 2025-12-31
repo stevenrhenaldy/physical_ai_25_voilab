@@ -30,10 +30,12 @@ def launch_dataset_visualizer():
 @click.option('--task', type=click.Choice(['kitchen', 'dining-room', 'living-room']),
               required=True, help='Task environment to load')
 @click.option('--session_dir', type=str, help='Path to UMI session directory for trajectory replay')
-@click.option('--episode', default=0, type=int, help='Episode to replay')
+@click.option('--episode', default=None, type=int, help='Episode to replay')
+@click.option('--scene_only', is_flag=True, default=False, help='Bring up scene without replay (for live control)')
+@click.option('--random_layout', is_flag=True, default=False, help='Randomize object placement (use with --scene_only)')
 @click.option('--width', default=1280, help='Window width')
 @click.option('--height', default=720, help='Window height')
-def launch_simulator(task, session_dir, episode, width, height):
+def launch_simulator(task, session_dir, episode, scene_only, random_layout, width, height):
     """Launch Isaac Sim with ROS2 bridge enabled"""
     try:
         # Prepare environment
@@ -53,14 +55,32 @@ def launch_simulator(task, session_dir, episode, width, height):
             "WINDOW_HEIGHT": str(height),
         })
         
-        click.echo(f"[CLI] Launching Isaac Sim + ROS2: task={task}, resolution={width}x{height}")
+        mode = "scene-only" if scene_only else "replay"
+        click.echo(f"[CLI] Launching Isaac Sim + ROS2: task={task}, mode={mode}, resolution={width}x{height}")
         
         # Build image
         click.echo("[CLI] Building Docker image...")
         build_cmd = ["docker", "compose", "build", "isaac-sim"]
         subprocess.run(build_cmd, env=env_vars, check=True)
 
-        container_command = f".venv/bin/python scripts/generate_data.py --task {task} --session_dir {session_dir} --episode {episode}"
+        # Build container command; only include --episode when provided
+        cmd_parts = [
+            ".venv/bin/python scripts/generate_data.py",
+            f"--task {task}",
+        ]
+
+        if scene_only:
+            cmd_parts.append("--scene_only")
+            if random_layout:
+                cmd_parts.append("--random_layout")
+        else:
+            if not session_dir:
+                click.echo("[ERROR] --session_dir is required unless using --scene_only", err=True)
+                sys.exit(1)
+            cmd_parts.append(f"--session_dir {session_dir}")
+            if episode is not None:
+                cmd_parts.append(f"--episode {episode}")
+        container_command = " ".join(cmd_parts)
         
         # Run container with host network
         click.echo("[CLI] Starting Docker container with host network...")

@@ -24,12 +24,18 @@ from numcodecs import Blosc
 parser = argparse.ArgumentParser()
 parser.add_argument("--task", type=str, choices=["kitchen", "dining-room", "living-room"], required=True)
 parser.add_argument("--session_dir", type=str, default=None)
+parser.add_argument("--episode", type=int, default=None, help="Specific episode index to run (optional)")
+parser.add_argument("--scene_only", action="store_true", help="Bring up scene without session_dir or replay (for live control)")
+parser.add_argument("--random_layout", action="store_true", help="Randomize object placement (ignores session_dir object poses)")
 parser.add_argument("--x_offset", type=float, default=0.1, help="X-axis offset for coordinate calibration (meters)")
 parser.add_argument("--y_offset", type=float, default=0.15, help="Y-axis offset for coordinate calibration (meters)")
 parser.add_argument("--z_offset", type=float, default=-0.07, help="Z-axis offset for coordinate calibration (meters)")
 args = parser.parse_args()
 
 from isaacsim import SimulationApp
+
+# Determine if we're in scene-only mode to avoid SyntheticData extension crash
+is_scene_only = "--scene_only" in sys.argv
 
 config = {
     "headless": False,
@@ -38,6 +44,11 @@ config = {
     "enable_streaming": False,
     "extensions": ["isaacsim.robot_motion.motion_generation"]
 }
+
+# Skip SyntheticData in scene-only mode to avoid omnigraph crash
+if not is_scene_only:
+    config["extensions"].append("omni.syntheticdata")
+
 simulation_app = SimulationApp(config)
 
 import omni.usd
@@ -68,6 +79,7 @@ import lula
 from pxr import UsdPhysics
 from umi_replay import set_gripper_width
 from motion_plan import PickPlace
+from keyboard_teleop import KeyboardTeleop
 
 
 assets_root_path = get_assets_root_path()
@@ -209,6 +221,49 @@ def get_object_world_size(object_prim_path: str):
     prim_bbox = bbox_cache.ComputeWorldBound(prim)
     prim_range = prim_bbox.ComputeAlignedRange()
     return prim_range.GetSize()
+
+
+def _randomize_objects(cfg, object_prims, aruco_tag_pose, preload_by_name, min_xy_dist=0.05):
+    """Place preloaded objects randomly around ArUco tag in XY plane.
+
+    - Uses `PRELOAD_OBJECTS` entries to determine which objects to place
+    - Keeps Z capped by `OBJECT_MAXIMUM_Z_HEIGHT`
+    - Avoids XY overlap by enforcing min distance between centers
+    - Uses provided `quat_wxyz` if available; otherwise identity orientation
+    """
+    env = cfg.get("environment_vars", {})
+    max_z = float(env.get("OBJECT_MAXIMUM_Z_HEIGHT", 1.0))
+    center = np.array(aruco_tag_pose.get("translation", [0, 0, 0]), dtype=np.float64)
+
+    # Sampling bounds around tag (meters)
+    # +/- 0.25 m in X/Y is a reasonable tabletop neighborhood
+    x_range = (-0.25, 0.25)
+    y_range = (-0.25, 0.25)
+    z_value = min(center[2], max_z)
+
+    placed_positions = []
+    rng = np.random.default_rng()
+
+    for raw_name, prim in object_prims.items():
+        # Skip fixed-only or items not listed in PRELOAD_OBJECTS
+        preload_entry = preload_by_name.get(raw_name)
+        if preload_entry is None:
+            continue
+
+        # Sample until non-overlapping
+        for _ in range(100):
+            dx = rng.uniform(*x_range)
+            dy = rng.uniform(*y_range)
+            pos = center + np.array([dx, dy, 0.0])
+            pos[2] = z_value
+
+            if all(np.linalg.norm(pos[:2] - p[:2]) >= min_xy_dist for p in placed_positions):
+                break
+        placed_positions.append(pos)
+
+        quat_wxyz = np.array(preload_entry.get("quat_wxyz", [1.0, 0.0, 0.0, 0.0]), dtype=np.float64)
+        prim.set_world_pose(position=pos, orientation=quat_wxyz)
+        print(f"[RandomLayout] Placed {raw_name} at {pos} with orientation {quat_wxyz}")
 
 
 # ----------------------------------------------------------------------
@@ -449,14 +504,6 @@ def main():
     object_prims = {}
     object_poses_path = None
 
-    if args.session_dir is None:
-        print("[Main] ERROR: session_dir is required for multi-episode replay.")
-        simulation_app.close()
-        return
-
-    object_poses_path = os.path.join(args.session_dir, 'demos', 'mapping', 'object_poses.json')
-    print(f"[Main] Looking for object poses at: {object_poses_path}")
-
     preload_objects = cfg.get("environment_vars", {}).get("PRELOAD_OBJECTS", [])
     preload_by_name = {}
     for entry in preload_objects:
@@ -492,6 +539,37 @@ def main():
         object_prims[object_name] = obj_prim
         print(f"[ObjectLoader] Preloaded {raw_name} as {prim_path}")
 
+    # Apply any fixed objects constraints (e.g., storage box in living room)
+    _set_fixed_objects_for_episode(cfg, object_prims)
+
+    # After preload, decide whether to run scene-only or replay
+    if args.scene_only:
+        print("[Main] Scene-only mode: skipping session_dir and replay.")
+        if args.random_layout:
+            _randomize_objects(cfg, object_prims, aruco_tag_pose, preload_by_name)
+        
+        # Initialize keyboard teleoperation
+        teleop = KeyboardTeleop(panda, lula_solver, art_kine_solver, world)
+        
+        print("[Main] Keyboard teleoperation active. Press 'H' for help, 'ESC' to exit.")
+        # Keep sim alive for teleop/ROS without episode replay
+        while simulation_app.is_running():
+            if not teleop.step():
+                print("[Main] User requested exit (ESC pressed)")
+                break
+            world.step(render=True)
+            time.sleep(1 / 60)
+        simulation_app.close()
+        return
+    else:
+        if args.session_dir is None:
+            print("[Main] ERROR: session_dir is required for multi-episode replay.")
+            simulation_app.close()
+            return
+
+        object_poses_path = os.path.join(args.session_dir, 'demos', 'mapping', 'object_poses.json')
+        print(f"[Main] Looking for object poses at: {object_poses_path}")
+
     # Initialize kinematics solvers
     print(f"[Main] Initializing Kinematics with UMI config...")
     lula_solver = LulaKinematicsSolver(
@@ -514,7 +592,19 @@ def main():
     print("[Main] Starting simulation loop...")
 
     completed_episodes = _load_progress(args.session_dir)
-    episodes_to_run = [ep for ep in range(total_episodes) if ep not in completed_episodes]
+    
+    # Determine which episodes to run
+    if args.episode is not None:
+        # Run specific episode if provided
+        if args.episode >= total_episodes:
+            print(f"[Main] ERROR: Episode index {args.episode} out of range (0-{total_episodes-1})")
+            simulation_app.close()
+            return
+        episodes_to_run = [args.episode]
+    else:
+        # Run all uncompleted episodes
+        episodes_to_run = [ep for ep in range(total_episodes) if ep not in completed_episodes]
+    
     collected_episodes = []
 
     for episode_idx in episodes_to_run:
