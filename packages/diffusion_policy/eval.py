@@ -55,11 +55,22 @@ def main(checkpoint, output_dir, device, env_runner_path, urdf_path):
     )
 
     # run eval
+    # Only pass output_dir as base, let Hydra handle config-based params
+    runner_kwargs = {"output_dir": output_dir}
+    
+    # Add dataset_path and shape_meta if they exist in config
+    if hasattr(cfg, 'task') and hasattr(cfg.task, 'dataset_path'):
+        runner_kwargs["dataset_path"] = cfg.task.dataset_path
+    if hasattr(cfg, 'shape_meta'):
+        runner_kwargs["shape_meta"] = cfg.shape_meta
+    
+    # Only add CLI-provided optional args
+    if urdf_path is not None:
+        runner_kwargs["urdf_path"] = urdf_path
+    
     env_runner = hydra.utils.instantiate(
         env_runner_path,
-        output_dir=output_dir,
-        urdf_path=urdf_path,
-        shape_meta=cfg.shape_meta
+        **runner_kwargs
     )
     runner_log = env_runner.run(policy)
     
