@@ -427,19 +427,50 @@ class SLAMMappingService(BaseService):
                         return converted_path
 
                     # Use FFmpeg to convert from 120fps to 60fps
+#                    cmd = [
+#                        "ffmpeg",
+#                        "-i", str(video_path),
+#                        "-map_metadata", "0",
+#                        "-movflags", "+faststart+use_metadata_tags",
+#                        "-vf", "fps=60",
+#                        "-c:v", "libx264",
+#                        "-preset", "fast",
+#                        "-crf", "23",
+#                        "-c:a", "copy",
+#                        "-y",  # Overwrite output file
+#                        str(converted_path)
+#                    ]
+
                     cmd = [
                         "ffmpeg",
                         "-i", str(video_path),
                         "-map_metadata", "0",
                         "-movflags", "+faststart+use_metadata_tags",
-                        "-vf", "fps=60",
-                        "-c:v", "libx264",
-                        "-preset", "fast",
-                        "-crf", "23",
+
+                        # Match your old behavior (fps filter), but make it NVENC-friendly
+                        "-vf", "fps=60,format=yuv420p",
+
+                        # NVIDIA NVENC (GTX 1050 Ti)
+                        "-c:v", "h264_nvenc",
+                        "-preset", "slow",
+                        "-tune", "hq",
+
+                        # Best-looking NVENC settings to try first
+                        "-rc:v", "vbr_hq",
+                        "-multipass", "fullres",
+                        "-cq:v", "19",
+                        "-b:v", "8M",
+                        "-maxrate:v", "16M",
+                        "-bufsize:v", "16M",
+
+                        # Audio unchanged
                         "-c:a", "copy",
-                        "-y",  # Overwrite output file
-                        str(converted_path)
+
+                        # Overwrite output file
+                        "-y",
+                        str(converted_path),
                     ]
+
 
                     logger.info(f"Running FFmpeg conversion: {' '.join(cmd)}")
 
