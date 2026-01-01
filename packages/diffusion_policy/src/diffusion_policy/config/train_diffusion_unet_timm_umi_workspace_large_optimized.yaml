@@ -160,9 +160,9 @@ training:
   debug: False
   resume: False
   # optimization
-  lr_scheduler: cosine
+  # lr_scheduler: cosine
   # lr_warmup_steps: 2000
-  # num_epochs: 120
+  num_epochs: 120
   lr_scheduler: cosine
   lr_warmup_steps: 1000 # Reduced from 2000 to reach peak performance faster
   # gradient_accumulate_every: 1
