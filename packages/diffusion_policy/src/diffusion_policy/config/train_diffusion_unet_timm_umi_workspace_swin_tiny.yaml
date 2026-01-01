@@ -43,7 +43,7 @@ policy:
     # frozen: False
 
     ##### from scratch #####
-    model_name: 'vit_tiny_patch16_224'
+    model_name: 'swin_tiny_patch4_window7_224.ms_in1k'
     pretrained: True
     frozen: False
 
@@ -51,7 +51,7 @@ policy:
     global_pool: ''
 
     # 'avg' or 'max' or 'soft_attention' or 'spatial_embedding' or 'transformer' or 'attention_pool_2d'
-    feature_aggregation: 'attention_pool_2d'
+    feature_aggregation: 'avg'
     # feature_aggregation: null
     position_encording: 'sinusoidal' # 'learnable' or 'sinusoidal'. it only works for transformer
 
@@ -97,7 +97,8 @@ policy:
   diffusion_step_embed_dim: 128
   # down_dims: [256,512,1024]
   # down_dims: [256, 512, 768]
-  down_dims: [128, 256, 192]
+  # down_dims: [512, 1024, 1536]
+  down_dims: [256, 512, 768]
 
   kernel_size: 5
   n_groups: 8
@@ -116,7 +117,7 @@ ema:
   max_value: 0.9999
 
 dataloader:
-  batch_size: 128
+  batch_size: 64
   num_workers: 16
   shuffle: True
   pin_memory: True
@@ -156,12 +157,13 @@ training:
   debug: False
   resume: False
   # optimization
+  # lr_scheduler: cosine
   # lr_warmup_steps: 2000
-  num_epochs: 200
+  num_epochs: 150
   lr_scheduler: cosine
   lr_warmup_steps: 1000 # Reduced from 2000 to reach peak performance faster
   # gradient_accumulate_every: 1
-  gradient_accumulate_every: 8
+  gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
   use_ema: True
