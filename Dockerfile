@@ -21,6 +21,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
     UV_NO_CACHE=1 \
+    UV_HTTP_TIMEOUT=600 \
+    UV_HTTP_RETRIES=10 \
     # Make uv the default python/pip replacement
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     VIRTUAL_ENV=/workspace/voilab/.venv
@@ -73,12 +75,12 @@ COPY packages/diffusion_policy/README.md /workspace/voilab/packages/diffusion_po
 
 # Install dependencies (excluding workspace packages themselves)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --python ${VIRTUAL_ENV}
+    bash -c "export UV_HTTP_TIMEOUT=600 UV_HTTP_RETRIES=10 && uv sync --frozen --python ${VIRTUAL_ENV}"
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python ${VIRTUAL_ENV} \
-        "isaacsim[all,extscache]==5.1.0" \
-        --extra-index-url https://pypi.nvidia.com
+    bash -c "export UV_HTTP_TIMEOUT=600 UV_HTTP_RETRIES=10 && uv pip install --python ${VIRTUAL_ENV} \
+        \"isaacsim[all,extscache]==5.1.0\" \
+        --extra-index-url https://pypi.nvidia.com"
 
 # Copy the rest of the source code
 COPY . /workspace/voilab

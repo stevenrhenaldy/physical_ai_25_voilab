@@ -12,13 +12,13 @@ install-uv:
 .PHONY install:
 install: install-uv
 	@echo "Installing project dependencies using uv..."
-	@uv sync
+	@UV_HTTP_TIMEOUT=600 uv sync
 	@echo "Dependencies installed successfully"
 
 .PHONY install-dev:
 install-dev: install-uv
 	@echo "Installing project dev dependencies using uv..."
-	@uv sync --extra dev
+	@UV_HTTP_TIMEOUT=600 uv sync --extra dev
 	@echo "Dev dependencies installed successfully"
 
 .PHONY launch-jupyterlab:
